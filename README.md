@@ -1,5 +1,7 @@
-2StepAuth
-=========
+
+<p align="center">
+  <img src="http://i.imgur.com/leEDvlZ.png" />
+</p>
   
 ##What is it?  
 2StepAuth (2 step authorization) is a MyBB plugin created as a extra security layer on top of the normal login procedure.  
