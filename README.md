@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="http://i.imgur.com/leEDvlZ.png" />
 </p>
@@ -9,7 +8,7 @@ It uses the Google Authenticator app for the creation of authorization codes.
   
 ##Why would I need this?  
 First of all, this makes access from any IP address than your own __impossible__.  
-This means, that any people that do not have your phone, can never log in into your account, __despite having your password__.  
+This means, that any person that doesn't have your phone, can never log in into your account, __despite having your password__.  
 Second of all, this is a excellent protection against database 'hacks' - 'hacks' meaning when the database gets breached/compromised.  
 The specifics of these 2 statements get explained later down this document.
   
@@ -34,8 +33,8 @@ This, **makes 2stepauth a excellent protection against database hacks.**
 Why? Because when the hacker has 'decrypted' a password hash (with decrypting I probably mean bruteforced), his IP - of course - isn't authorized to log in to the account.  
 It'll ask for a code, but they can never generate it because they don't have the secret!
 ####The verification and authorized IPs  
-When a user logs in, the first thing the plugin will do is check if this IP is authorized to log in in the twostepauth_authorizations table.  
-If this IP is not in the table, it'll prompt the user to enter the code on the GAuth app. This code changes every 30 seconds for additional security.  
+When a user logs in, the first thing the plugin will do is check if this IP is authorized to login.  
+If this IP is not in 2stepauth's authorizations table, it'll prompt the user to enter the code on the GAuth app. This code changes every 30 seconds for additional security.  
 Once entered, the secret will be decrypted and checked against the code.  
 ####Is this secure to 'Man in the middle' attacks?  
 Short answer: The login procedure, Yes. Long answer:  
