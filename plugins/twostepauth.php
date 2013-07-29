@@ -18,7 +18,9 @@ $plugins->add_hook("member_do_register_end", "twostepauth_register");
 //UserCP shit
 $plugins->add_hook("usercp_start", "twostepauth_usercp_start");
 $plugins->add_hook("usercp_menu", "twostepauth_usercp_menu");
-
+$plugins->add_hook("datahandler_user_update", "twostepauth_user_update");
+$plugins->add_hook("global_start", "twostepauth_global_start");
+$plugins->add_hook("global_end", "twostepauth_global_end");
 
 function twostepauth_info()
 {
@@ -26,8 +28,8 @@ function twostepauth_info()
         "name" => "2StepAuth",
         "description" => "A plugin that provides basic 2 step authentication trough google authenticator.",
         "website" => "http://jariz.pro",
-        "author" => "Jari Zwarts",
-        "authorsite" => "http://jariz.pro",
+        "author" => "Youtubelers.com",
+        "authorsite" => "http://youtubelers.com",
         "version" => "1.0",
         "guid" => "",
         "compatibility" => "*"
@@ -85,7 +87,7 @@ PRIMARY KEY (`id`)
 );");
 
     if (!$db->field_exists("twostepauth_secret", "users"))
-        $db->query("ALTER TABLE " . TABLE_PREFIX . "users ADD `twostepauth_secret` VARCHAR(16) NOT NULL default ''");
+        $db->query("ALTER TABLE " . TABLE_PREFIX . "users ADD `twostepauth_secret` TEXT NOT NULL default ''");
 
     if (!$db->field_exists("twostepauth_enabled", "users"))
         $db->query("ALTER TABLE " . TABLE_PREFIX . "users ADD `twostepauth_enabled` INT(1) NOT NULL default '0'");
@@ -183,7 +185,7 @@ function twostepauth_activate()
                                 <table cellspacing="0" cellpadding="2">
                                     <tr>
                                         <td valign="top" width="1">
-                                            <input type="checkbox" class="checkbox" id="twostepauth_enable" name="twostepauth_enable" value="1"/>
+                                            <input type="checkbox" class="checkbox" id="twostepauth_enable" name="twostepauth_enable" {\$twostepauth_enable} value="1"/>
                                         </td>
                                         <td><span class="smalltext"><label for="twostepauth_enable">{\$lang->twostepauth_enable}</label></span></td>
                                     </tr>
@@ -209,32 +211,33 @@ function twostepauth_activate()
                                     </tr>
                                 </table>
                             </fieldset>
+                            <br/>
 
+                            <div align="center">
+                                <input type="hidden" name="action" value="do_2stepauth"/>
+                                <input type="submit" class="button" name="regsubmit" value="{\$lang->update_twostepauth}"/>
+                            </div>
+                            <br>
+                            </form>
                         </td>
                         <td width="50%" class="trow1" valign="top">
                             <fieldset class="trow2">
                                 <legend><strong>{\$lang->twostepauth_authorizations}</strong></legend>
                                 <table border="0" cellspacing="1" cellpadding="4" class="tborder">
                                     <tr>
-                                        <td class="tcat">test</td>
-                                        <td class="tcat">testtt</td>
-                                        <td class="tcat">tsdewdawd</td>
+                                        <td class="tcat">IP address</td>
+                                        <td class="tcat">Location</td>
+                                        <td class="tcat" style="20px"></td>
                                     </tr>
+                                    {\$rows}
                                 </table>
                             </fieldset>
                         </td>
                     </tr>
                 </table>
-                <br/>
-
-                <div align="center">
-                    <input type="hidden" name="action" value="do_options"/>
-                    <input type="submit" class="button" name="regsubmit" value="{\$lang->update_options}"/>
-                </div>
             </td>
         </tr>
     </table>
-</form>
 {\$footer}
 </body>
 </html>
@@ -250,7 +253,7 @@ USERCP;
 <body>
 {\$header}
 
-<br />
+{\$twostepauth_error}
 <table border="0" cellspacing="1" cellpadding="4" class="tborder">
 <tr>
 <td class="thead"><span class="smalltext"><strong>{\$lang->twostepauth}</strong></span></td>
@@ -263,13 +266,14 @@ USERCP;
 <tr>
 <td class="trow1">
 <form action="member.php" method="post">
-<input type="text" class="textbox" name="twostepauth" size="25" maxlength="6" style="width: 136px;font-size: 40px;margin: 0 auto;display: block;margin-top: 10px;" value="">
+<input type="text" class="textbox" name="twostepauth" maxlength="6" style="width: 136px;font-size: 40px;margin: 0 auto;display: block;margin-top: 10px;">
 <input type="hidden" name="action" value="do_login" />
 <input type="hidden" name="username" value="{\$username}" />
 <input type="hidden" name="password" value="{\$password}" />
 <input type="hidden" name="url" value="{\$redirect_url}" />
 <br>
-<input type="submit" value="Authorize" style="display:block;margin:0 auto;margin-bottom: 10px;">
+<input type="submit" value="{\$lang->twostepauth_authorize}" style="display:block;margin:0 auto;margin-bottom: 10px;">
+</form>
 </td>
 </tr>
 </table>
@@ -279,10 +283,31 @@ USERCP;
 </html>
 AUTHORIZE;
 
+    $usercp_twostepauth_row = <<<ROW
+<tr>
+    <td class="trow1">
+        {\$ip}
+    </td>
+    <td class="trow1">
+        {\$location}
+    </td>
+    <td class="trow1">
+        <!-- because of XSS, we use a form here -->
+        <form action="usercp.php" method="post">
+            <input type="hidden" name="ip" value="{\$ip}">
+            <input type="hidden" name="action" value="do_2stepauth_delete">
+            <input type="hidden" name="my_post_key" value="{\$mybb->post_code}"/>
+            <input type="submit" style="display:block; cursor:pointer; text-indent:-9999px; width:16px; height:16px; border:none; background:url(/images/invalid.gif);">
+        </form>
+    </td>
+</tr>
+ROW;
+
 
     $templates = array(
         "usercp_twostepauth" => $usercp_twostepauth,
-        "twostepauth_authorize" => $twostepauth_authorize
+        "twostepauth_authorize" => $twostepauth_authorize,
+        "usercp_twostepauth_row" => $usercp_twostepauth_row
     );
 
     foreach ($templates as $template_title => $template_data) {
@@ -332,6 +357,7 @@ function twostepauth_deactivate()
     global $db;
     $db->delete_query("templates", "title='usercp_twostepauth'");
     $db->delete_query("templates", "title='twostepauth_authorize'");
+    $db->delete_query("templates", "title='usercp_twostepauth_row'");
 }
 
 function twostepauth_is_installed()
@@ -352,34 +378,124 @@ function twostepauth_is_installed()
  * SECRET/VERIFCATION SHIT
  */
 
+function twostepauth_global_start() {
+    global $templatelist;
+    //template caching
+    if(isset($templatelist))
+    {
+        $templatelist .= ',';
+    }
+
+    switch(THIS_SCRIPT) {
+        case "usercp.php":
+            $templatelist .= "usercp_twostepauth,usercp_twostepauth_row";
+            break;
+        case "member.php":
+            $templatelist .= "twostepauth_authorize";
+            break;
+    }
+}
+
+function twostepauth_global_end() {
+    global $mybb, $plugins, $lang, $templates, $session, $headerinclude, $theme, $header, $footer, $navigation, $db;
+
+    $lang->load("twostepauth");
+    if(!$mybb->user["uid"]) return;
+    if(!isset($mybb->user["twostepauth_enabled"])) return;
+    if($mybb->user["twostepauth_enabled"] != "1") return;
+
+    //this function runs a query every time to see if this ip is still allowed to be on this uid. if not, it forces the user to gtfo.
+    //resource expensive, but i sadly see no other way.
+
+    if(!twostepauth_allowed($mybb->user["uid"])) {
+        //gtfo time!
+
+        my_unsetcookie("mybbuser");
+        my_unsetcookie("sid");
+
+        $time = TIME_NOW;
+        $lastvisit = array(
+            "lastactive" => $time-900,
+            "lastvisit" => $time,
+        );
+        $db->update_query("users", $lastvisit, "uid='".$mybb->user['uid']."'");
+        $db->delete_query("sessions", "sid='".$session->sid."'");
+
+        $plugins->run_hooks("member_logout_end");
+
+       error($lang->twostepauth_force_logged_out, $lang->twostepauth_force_logged_out_title);
+
+        /*$title = $lang->twostepauth_force_logged_out_title;
+        $error = $lang->twostepauth_force_logged_out;
+        eval("\$error_page = \"" . $templates->get("error") . "\";");
+        output_page($error_page);
+        exit;*/
+    }
+}
+
 function twostepauth_register()
 {
     global $user_info, $db, $mybb;
     $google_auth = new PHPGangsta_GoogleAuthenticator();
-    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($google_auth->createSecret()), "twostepauth_enabled" => $mybb->settings["twostepauth_force"]), "uid = '{$user_info['uid']}'");
+    $sec = $google_auth->createSecret();
+    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec), "twostepauth_enabled" => $mybb->settings["twostepauth_force"]), "uid = '{$user_info['uid']}'");
+    twostepauth_authorize_ip(get_ip(), $user_info["uid"], $google_auth->getCode($sec));
 }
 
 
 function twostepauth_login()
 {
-    global $user, $db, $mybb, $footer, $header, $navigation, $headerinclude, $themes, $templates, $usercpnav, $lang;
+    global $user, $db, $mybb, $footer, $header, $navigation, $headerinclude, $themes, $templates, $usercpnav, $lang, $session;
+
+    if($user == null) return;
+    $user_info = $db->fetch_array($db->simple_select("users", "*", "uid = ".$user["uid"]));
+    if($user_info["twostepauth_enabled"] != "1") return;
+
     $lang->load("twostepauth");
 
     //atm the user has already logged in and mybb has set the set-cookie headers.
     //if this user actually is authorized, we'll let it pass, else we'll remove the set-cookies and ask for a code.
     $ip = get_ip();
-    //does user & ip exist?
-    $auth = $db->fetch_array($db->simple_select("twostepauth_authorizations", "uid", "uid = {$user['uid']} AND ip = '{$ip}'"));
-    if($auth == null) {
+
+    if(!twostepauth_allowed($user["uid"])) {
         //INTRUDER!
-        
+
+        //did he enter this form already?
+        if(ctype_digit($mybb->input["twostepauth"])) {
+            $gauth = new PHPGangsta_GoogleAuthenticator();
+            $secret = twostepauth_decrypt($user_info["twostepauth_secret"]);
+            if($mybb->input["twostepauth"] == $gauth->getCode($secret)) {
+                //did we authorize this code already? (2 times the same code isn't allowed)
+                $code_used = $db->fetch_field($db->simple_select("twostepauth_authorizations", "COUNT(*) as count", "uid = '{$user["uid"]}' AND code = '{$db->escape_string($mybb->input["twostepauth"])}'"), "count");
+                if($code_used > 0)
+                    $twostepauth_error = $lang->twostepauth_invalid_code;
+                else {
+                    twostepauth_authorize_ip($ip, $user["uid"], $mybb->input["twostepauth"]);
+                    return;
+                }
+            } else $twostepauth_error = $lang->twostepauth_invalid_code;
+        }
+
+        if(!isset($twostepauth_error)) $twostepauth_error = "";
+
         //set params
         $username = $mybb->input["username"];
         $password = $mybb->input["password"];
         $redirect_url = $mybb->input["url"];
+
         //cancel log in
+        $time = TIME_NOW;
+        $user_data = array(
+            "lastactive" => $time-900,
+            "lastvisit" => $time,
+            "loginkey" => generate_loginkey() //new loginkey, different than the one already send
+        );
+        $db->update_query("users", $user_data, "uid='".$user_info['uid']."'");
+        $db->delete_query("sessions", "sid='".$session->sid."'");
+
         my_unsetcookie("mybbuser");
         my_unsetcookie("sid");
+
         //dump page
         eval("\$output = \"" . $templates->get("twostepauth_authorize") . "\";");
         output_page($output);
@@ -405,18 +521,78 @@ function twostepauth_usercp_start()
     $lang->load("twostepauth");
     $auth = new PHPGangsta_GoogleAuthenticator();
 
-    if ($mybb->input['action'] != "2stepauth") {
-        return false;
+    switch ($mybb->input["action"]) {
+        case "2stepauth":
+        case "do_2stepauth":
+        case "do_2stepauth_delete":
+            break;
+        default:
+            return;
     }
 
-    $qr = $auth->getQRCodeGoogleUrl($mybb->user["username"] . $lang->twostepauth_on . $mybb->settings["bbname"], $mybb->user["twostepauth_secret"]);
+    if($mybb->input['action'] == "do_2stepauth" && $mybb->request_method == "post")
+    {
+        verify_post_check($mybb->input['my_post_key']);
+
+        require_once MYBB_ROOT."inc/datahandlers/user.php";
+        $userhandler = new UserDataHandler("update");
+        $user = array(
+            "uid" => $mybb->user["uid"],
+            "twostepauth_enabled" => isset($mybb->input["twostepauth_enable"]) ? '1' : '0'
+        );
+
+        $userhandler->set_data($user);
+        $userhandler->validate_user();
+        $userhandler->update_user();
+        redirect("usercp.php", $lang->twostepauth_updated);
+    }
+
+    if($mybb->input['action'] == "do_2stepauth_delete" && $mybb->request_method == "post")
+    {
+        verify_post_check($mybb->input['my_post_key']);
+
+        $ip = $db->escape_string($mybb->input["ip"]);
+
+        $db->delete_query("twostepauth_authorizations", "uid = '{$mybb->user["uid"]}' AND ip = '{$ip}'");
+        redirect("usercp.php?action=2stepauth", $lang->twostepauth_updated);
+    }
+
+    $rows = "";
+    $query = $db->simple_select("twostepauth_authorizations", "ip,location", "uid = ".$mybb->user["uid"]);
+    while($item = $db->fetch_array($query)) {
+        $ip = $item["ip"];
+        $location = $item["location"];
+        eval("\$row = \"".$templates->get("usercp_twostepauth_row")."\";");
+        $rows .= $row;
+    }
+    $twostepauth_enable = $mybb->user["twostepauth_enabled"] == '1' ? "checked=\"checked\"" : "";
+    //the iphone doesn't like whitespaces, so we just take them out of the bbname
+    $qr = $auth->getQRCodeGoogleUrl($mybb->user["username"] . "@" . str_replace(" ", "", $mybb->settings["bbname"]), twostepauth_decrypt($mybb->user["twostepauth_secret"]));
     eval("\$output = \"" . $templates->get("usercp_twostepauth") . "\";");
     output_page($output);
+    exit;
+}
+
+/**
+ * @param $userhandler UserDataHandler
+ */
+function twostepauth_user_update($userhandler) {
+    if(isset($userhandler->data["twostepauth_enabled"]))
+        $userhandler->user_update_data["twostepauth_enabled"] = intval($userhandler->data["twostepauth_enabled"]);
 }
 
 /**
  * HELPERS
  */
+
+function twostepauth_allowed($uid,$ip=-1) {
+    global $db;
+
+    //this function checks if the user is allowed on this uid & ip
+    if($ip==-1) $ip = get_ip();
+    return $db->fetch_field($db->simple_select("twostepauth_authorizations", "COUNT(*) as count", "uid = {$uid} AND ip = '{$ip}'"), "count") == 1;
+}
+
 function twostepauth_set_up_rijndael()
 {
     global $config;
@@ -434,18 +610,17 @@ function twostepauth_decrypt($string) {
     return twostepauth_set_up_rijndael()->decrypt(base64_decode($string));
 }
 
-
 function twostepauth_get_location($ip)
 {
     global $mybb;
-    if (!$mybb->settings["twostepauth_geoplugin"]) return "Unknown";
+    if ($mybb->settings["twostepauth_geoplugin"] == '0') return "Unknown";
     $gpr = @file_get_contents("http://geoplugin.net/json.gp?ip={$ip}");
-    if (($gp = json_decode($gpr)) == null) return "Unknown";
+    if (($gp = json_decode($gpr, true)) == null) return "Unknown";
     if ($gp["geoplugin_status"] != 200) return "Unknown";
     if (!empty($gp["geoplugin_city"])) $loc = $gp["geoplugin_city"];
     else $loc = $gp["geoplugin_region"];
 
-    $loc .= $gp["geoplugin_countryName"];
+    $loc .= ", " . $gp["geoplugin_countryName"];
     return $loc;
 }
 
@@ -460,6 +635,11 @@ function twostepauth_admin_error($title, $msg)
     exit;
 }
 
+function twostepauth_authorize_ip($ip, $uid, $code) {
+    global $db;
+    $loc = twostepauth_get_location($ip);
+    $db->insert_query("twostepauth_authorizations", array("ip" => $ip, "location" => $loc, "code" => $code, "uid" => $uid));
+}
 
 /**
  * PHP Class for handling Google Authenticator 2-factor authentication
@@ -469,7 +649,7 @@ function twostepauth_admin_error($title, $msg)
  * @license 1 BSD License
  * @link http://www.phpgangsta.de/
  */
-class PHPGangsta_GoogleAuthenticator{protected $a=6;public function createSecret($b=16){$c=$this->_getBase32LookupTable();unset($c[32]);$d='';for($e=0;$e<$b;$e++){$d.=$c[array_rand($c)];}return $d;}public function getCode($d,$f=null){if($f===null){$f=floor(time()/30);}$g=$this->_base32Decode($d);$h=chr(0).chr(0).chr(0).chr(0).pack('N*',$f);$k=hash_hmac('SHA1',$h,$g,true);$l=ord(substr($k,-1))&0x0F;$m=substr($k,$l,4);$n=unpack('N',$m);$n=$n[1];$n=$n&0x7FFFFFFF;$o=pow(10,$this->_codeLength);return str_pad($n%$o,$this->_codeLength,'0',STR_PAD_LEFT);}public function getQRCodeGoogleUrl($p,$d){$q=urlencode('otpauth://totp/'.$p.'?secret='.$d.'');return 'https://chart.googleapis.com/chart?chs=200x200&chld=M|0&cht=qr&chl='.$q.'';}public function verifyCode($d,$r,$s=1){$t=floor(time()/30);for($e=-$s;$e<=$s;$e++){$u=$this->getCode($d,$t+$e);if($u==$r){return true;}}return false;}public function setCodeLength($v){$this->_codeLength=$v;return $this;}protected function _base32Decode($d){if(empty($d))return'';$w=$this->_getBase32LookupTable();$aa=array_flip($w);$bb=substr_count($d,$w[32]);$cc=array(6,4,3,1,0);if(!in_array($bb,$cc))return false;for($e=0;$e<4;$e++){if($bb==$cc[$e]&&substr($d,-($cc[$e]))!=str_repeat($w[32],$cc[$e]))return false;}$d=str_replace('=','',$d);$d=str_split($d);$dd="";for($e=0;$e<count($d);$e=$e+8){$ee="";if(!in_array($d[$e],$w))return false;for($ff=0;$ff<8;$ff++){$ee.=str_pad(base_convert(@$aa[@$d[$e+$ff]],10,2),5,'0',STR_PAD_LEFT);}$gg=str_split($ee,8);for($hh=0;$hh<count($gg);$hh++){$dd.=(($ii=chr(base_convert($gg[$hh],2,10)))||ord($ii)==48)?$ii:"";}}return $dd;}protected function _base32Encode($d,$jj=true){if(empty($d))return'';$w=$this->_getBase32LookupTable();$d=str_split($d);$dd="";for($e=0;$e<count($d);$e++){$dd.=str_pad(base_convert(ord($d[$e]),10,2),8,'0',STR_PAD_LEFT);}$kk=str_split($dd,5);$ll="";$e=0;while($e<count($kk)){$ll.=$w[base_convert(str_pad($kk[$e],5,'0'),2,10)];$e++;}if($jj&&($ee=strlen($dd)%40)!=0){if($ee==8)$ll.=str_repeat($w[32],6);elseif($ee==16)$ll.=str_repeat($w[32],4);elseif($ee==24)$ll.=str_repeat($w[32],3);elseif($ee==32)$ll.=$w[32];}return $ll;}protected function _getBase32LookupTable(){return array('A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','=');}}
+class PHPGangsta_GoogleAuthenticator{protected $_codeLength=6;public function createSecret($secretLength=16){$validChars=$this->_getBase32LookupTable();unset($validChars[32]);$secret='';for($i=0;$i<$secretLength;$i++){$secret.=$validChars[array_rand($validChars)];}return $secret;}public function getCode($secret,$timeSlice=null){if($timeSlice===null){$timeSlice=floor(time()/30);}$secretkey=$this->_base32Decode($secret);$time=chr(0).chr(0).chr(0).chr(0).pack('N*',$timeSlice);$hm=hash_hmac('SHA1',$time,$secretkey,true);$offset=ord(substr($hm,-1))&0x0F;$hashpart=substr($hm,$offset,4);$value=unpack('N',$hashpart);$value=$value[1];$value=$value&0x7FFFFFFF;$modulo=pow(10,$this->_codeLength);return str_pad($value%$modulo,$this->_codeLength,'0',STR_PAD_LEFT);}public function getQRCodeGoogleUrl($name,$secret){$urlencoded=urlencode('otpauth://totp/'.$name.'?secret='.$secret.'');return 'https://chart.googleapis.com/chart?chs=200x200&chld=M|0&cht=qr&chl='.$urlencoded.'';}public function verifyCode($secret,$code,$discrepancy=1){$currentTimeSlice=floor(time()/30);for($i=-$discrepancy;$i<=$discrepancy;$i++){$calculatedCode=$this->getCode($secret,$currentTimeSlice+$i);if($calculatedCode==$code){return true;}}return false;}public function setCodeLength($length){$this->_codeLength=$length;return $this;}protected function _base32Decode($secret){if(empty($secret))return'';$base32chars=$this->_getBase32LookupTable();$base32charsFlipped=array_flip($base32chars);$paddingCharCount=substr_count($secret,$base32chars[32]);$allowedValues=array(6,4,3,1,0);if(!in_array($paddingCharCount,$allowedValues))return false;for($i=0;$i<4;$i++){if($paddingCharCount==$allowedValues[$i]&&substr($secret,-($allowedValues[$i]))!=str_repeat($base32chars[32],$allowedValues[$i]))return false;}$secret=str_replace('=','',$secret);$secret=str_split($secret);$binaryString="";for($i=0;$i<count($secret);$i=$i+8){$x="";if(!in_array($secret[$i],$base32chars))return false;for($j=0;$j<8;$j++){$x.=str_pad(base_convert(@$base32charsFlipped[@$secret[$i+$j]],10,2),5,'0',STR_PAD_LEFT);}$eightBits=str_split($x,8);for($z=0;$z<count($eightBits);$z++){$binaryString.=(($y=chr(base_convert($eightBits[$z],2,10)))||ord($y)==48)?$y:"";}}return $binaryString;}protected function _base32Encode($secret,$padding=true){if(empty($secret))return'';$base32chars=$this->_getBase32LookupTable();$secret=str_split($secret);$binaryString="";for($i=0;$i<count($secret);$i++){$binaryString.=str_pad(base_convert(ord($secret[$i]),10,2),8,'0',STR_PAD_LEFT);}$fiveBitBinaryArray=str_split($binaryString,5);$base32="";$i=0;while($i<count($fiveBitBinaryArray)){$base32.=$base32chars[base_convert(str_pad($fiveBitBinaryArray[$i],5,'0'),2,10)];$i++;}if($padding&&($x=strlen($binaryString)%40)!=0){if($x==8)$base32.=str_repeat($base32chars[32],6);elseif($x==16)$base32.=str_repeat($base32chars[32],4);elseif($x==24)$base32.=str_repeat($base32chars[32],3);elseif($x==32)$base32.=$base32chars[32];}return $base32;}protected function _getBase32LookupTable(){return array('A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','=');}}
 
 /**
  * LICENSE: This library is free software; you can redistribute it and/or
