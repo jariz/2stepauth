@@ -24,7 +24,8 @@ $plugins->add_hook("global_end", "twostepauth_global_end");
 
 function twostepauth_info()
 {
-    return array(
+    global $mybb;
+    $info =  array(
         "name" => "2StepAuth",
         "description" => "A plugin that provides basic 2 step authentication trough google authenticator.",
         "website" => "http://jariz.pro",
@@ -34,22 +35,9 @@ function twostepauth_info()
         "guid" => "",
         "compatibility" => "*"
     );
+    if(twostepauth_is_installed()) $info["description"] .= "<br><a style='color:#C00;' href='index.php?module=config-plugins&action=deactivate&uninstall=1&plugin=twostepauth&my_post_key={$mybb->post_code}&harakiri=1' onclick=\"return confirm('Are you sure this is what you want? This will remove ALL AUTHORIZATIONS and 2stepauth user settings, theres no way to recover this ever again. If you want to uninstall the plugin normally, use the uninstall option on the right.');\">Click here to use a special kind of uninstall that will remove all user settings and authorizations.</a>";
+    return $info;
 }
-
-/**
- * TWOSTEPAUTH DB STRUCTURE:
- *
- * twostepauth_authorizations : id, ip, code, uid
- *      id: record id
- *      ip: ip user to authorize
- *      code: google authenticator code (not secret!)
- *      uid: user id
- *
- * users : twostepauth_secret, twostepauth_enabled
- *      twostepauth_secret: the generated secret (which gets generated on plugin activation for all users & on registration)
- *      twostepauth_enabled: does the user have 2stepauth enabled?
- */
-
 
 /**
  * INSTALL SHIT
@@ -92,7 +80,11 @@ PRIMARY KEY (`id`)
     if (!$db->field_exists("twostepauth_enabled", "users"))
         $db->query("ALTER TABLE " . TABLE_PREFIX . "users ADD `twostepauth_enabled` INT(1) NOT NULL default '0'");
 
-    //if(!)
+    if (!$db->field_exists("twostepauth_hide_hint", "users"))
+        $db->query("ALTER TABLE " . TABLE_PREFIX . "users ADD `twostepauth_hide_hint` INT(1) NOT NULL default '0'");
+
+    if (!$db->field_exists("twostepauth_method", "users"))
+        $db->query("ALTER TABLE " . TABLE_PREFIX . "users ADD `twostepauth_method` INT(1) NOT NULL default '1'");
 
     //give secrets to users that don't have them yet
     $auth = new PHPGangsta_GoogleAuthenticator();
@@ -124,6 +116,11 @@ PRIMARY KEY (`id`)
         'geoplugin' => array(
             'title' => 'Look up IP locations?',
             'description' => 'Look up user IPs with geoplugin.net (Example: Amsterdam, The Netherlands)',
+            'optionscode' => 'onoff',
+            'value' => '1'),
+        'hint' => array(
+            'title' => 'Show notice encouraging users to enable 2StepAuth?',
+            'description' => 'This will show a message to all users notifying them of the 2 step authorization option in their user CP\'s. They can dismiss this message.',
             'optionscode' => 'onoff',
             'value' => '1')
     );
@@ -163,6 +160,19 @@ function twostepauth_activate()
 <head>
     <title>{\$mybb->settings['bbname']} - {\$lang->setup_2stepauth}</title>
     {\$headerinclude}
+    <script>
+    Event.observe(document, "dom:loaded", function() {
+        $("2sa_enable").observe("click", function(x) {
+            if($("twostepauth_enable").checked) $("twostepauth_enabled_options").show();
+            else $("twostepauth_enabled_options").hide();
+        });
+        $("twostepauth_method_input").observe("change", function() {
+            if($("twostepauth_method_input").value == "1") $("twostepauth_qr").show();
+            else $("twostepauth_qr").hide();
+        });
+    });
+
+    </script>
 </head>
 <body>
 {\$header}
@@ -183,7 +193,7 @@ function twostepauth_activate()
                             <fieldset class="trow2">
                                 <legend><strong>{\$lang->twostepauth_enable}</strong></legend>
                                 <table cellspacing="0" cellpadding="2">
-                                    <tr>
+                                    <tr id="2sa_enable">
                                         <td valign="top" width="1">
                                             <input type="checkbox" class="checkbox" id="twostepauth_enable" name="twostepauth_enable" {\$twostepauth_enable} value="1"/>
                                         </td>
@@ -192,7 +202,22 @@ function twostepauth_activate()
                                 </table>
                             </fieldset>
 
+                            <div id="twostepauth_enabled_options"{\$options_show}>
                             <fieldset class="trow2">
+                                <legend><strong>{\$lang->twostepauth_method}</strong></legend>
+                                <table cellspacing="0" cellpadding="2">
+                                    <tr>
+                                        <td valign="top" width="1">
+                                            <select name="twostepauth_method" id="twostepauth_method_input">
+                                                <option value="1">{\$lang->twostepauth_method1}</option>
+                                                <option value="2">{\$lang->twostepauth_method2}</option>
+                                            </select>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </fieldset>
+
+                            <fieldset class="trow2" id="twostepauth_qr"{\$qr_show}>
                                 <legend><strong>{\$lang->twostepauth_qr}</strong></legend>
                                 <table cellspacing="0" cellpadding="2">
                                     <tr>
@@ -211,6 +236,7 @@ function twostepauth_activate()
                                     </tr>
                                 </table>
                             </fieldset>
+                            </div>
                             <br/>
 
                             <div align="center">
@@ -303,11 +329,26 @@ AUTHORIZE;
 </tr>
 ROW;
 
+    $twostepauth_hint = <<<HINT
+<div class="red_alert" style="text-align: left; color: #3a87ad;  background-color: #d9edf7;border-color: #6CDBF1;padding:5px 10px;">
+{\$lang->twostepauth_hint} <a href="/usercp.php?action=2stepauth&hide_notice=1&my_post_key={\$mybb->post_code}">{\$lang->twostepauth_hint_link}</a>
+<a style='float:right' href="/usercp.php?action=2stepauth&hide_notice=1&my_post_key={\$mybb->post_code}&redir_back=1">&times;</a>
+</div>
+HINT;
+
+    $twostepauth_email = <<<EMAIL
+<p>{\$lang->twostepauth_email1} <a href="{\$mybb->settings["bburl"]}>{\$mybb->settings["bbname"}</a>{\$lang->twostepauth_email2} {\$ip} (\$location} {\$lang->twostepauth_email3} <a href="{\$mybb->settings["bburl"]}/usercp.php?action=password">{\$lang->twostepauth_email4}</a></p>
+<p>{\$lang->twostepauth_email5} <a href="{\$activation_link}">{\$lang->twostepauth_email6}</a></p>
+<p>{\$lang->twostepauth_email7} {\$activation_code} </p>
+EMAIL;
+
 
     $templates = array(
         "usercp_twostepauth" => $usercp_twostepauth,
         "twostepauth_authorize" => $twostepauth_authorize,
-        "usercp_twostepauth_row" => $usercp_twostepauth_row
+        "usercp_twostepauth_row" => $usercp_twostepauth_row,
+        "twostepauth_hint" => $twostepauth_hint,
+        "twostepauth_email" => $twostepauth_email
     );
 
     foreach ($templates as $template_title => $template_data) {
@@ -324,7 +365,7 @@ ROW;
 
 function twostepauth_uninstall()
 {
-    global $db;
+    global $db, $mybb;
 
     // Remove settings
     $result = $db->simple_select('settinggroups', 'gid', "name = 'twostepauth_settings'", array('limit' => 1));
@@ -336,19 +377,38 @@ function twostepauth_uninstall()
         rebuild_settings();
     }
 
-    // This part will remove the database tables
-    // To avoid 'accidentally' uninstalling and loosing all your authorizations, this part only runs if there is a blank twostepauth_unlock file
-    // This completely uninstall including removing all the authenticated ips & secrets from the database.
-    if (file_exists(MYBB_ROOT . "twostepauth_unlock")) {
 
+    //user has made the 'harakiri' choice, meaning he wants to remove every trace of twostepauth ever existing
+    if($mybb->input["harakiri"] == "1") {
         if ($db->field_exists('twostepauth_enabled', 'users'))
             $db->query("ALTER TABLE " . TABLE_PREFIX . "users DROP column `twostepauth_enabled`");
 
         if ($db->field_exists('twostepauth_secret', 'users'))
             $db->query("ALTER TABLE " . TABLE_PREFIX . "users DROP column `twostepauth_secret`");
 
+        if ($db->field_exists('twostepauth_hide_hint', 'users'))
+            $db->query("ALTER TABLE " . TABLE_PREFIX . "users DROP column `twostepauth_hide_hint`");
+
+        if ($db->field_exists('twostepauth_method', 'users'))
+            $db->query("ALTER TABLE " . TABLE_PREFIX . "users DROP column `twostepauth_method`");
+
         if ($db->table_exists("twostepauth_authorizations"))
             $db->drop_table("twostepauth_authorizations");
+
+        $config = MYBB_ROOT."inc/config.php";
+        $fc = fopen($config, "r");
+        //this'll probably never happen because entire mybb can't run if the config isn't readable, but just for the sake of code logic
+        if(!$fc) twostepauth_admin_error("inc/config.php is not readable", "inc/config.php is not readable, you'll have to uncomment the last value yourself.");
+        $new_config = "";
+        foreach(explode("\n", fread($fc, filesize($config))) as $line) {
+            if(substr($line, 0, 42) == "\$config[\"2stepauth_secret_encryption_key\"]") $new_config .= "//".$line."\n";
+            else $new_config .= $line."\n";
+        }
+        fclose($fc);
+        $fc2 = fopen($config, "w");
+        if(!$fc) twostepauth_admin_error("inc/config.php is not writable", "inc/config.php is not writable, you'll have to uncomment the last value yourself.");
+        fwrite($fc2, $new_config);
+        fclose($fc2);
     }
 }
 
@@ -358,6 +418,8 @@ function twostepauth_deactivate()
     $db->delete_query("templates", "title='usercp_twostepauth'");
     $db->delete_query("templates", "title='twostepauth_authorize'");
     $db->delete_query("templates", "title='usercp_twostepauth_row'");
+    $db->delete_query("templates", "title='twostepauth_hint'");
+    $db->delete_query("templates", "title='twostepauth_email'");
 }
 
 function twostepauth_is_installed()
@@ -391,8 +453,10 @@ function twostepauth_global_start() {
             $templatelist .= "usercp_twostepauth,usercp_twostepauth_row";
             break;
         case "member.php":
-            $templatelist .= "twostepauth_authorize";
+            $templatelist .= "twostepauth_authorize,twostepauth_authorize_email,twostepauth_email";
             break;
+        default:
+            $templatelist .= "twostepauth_hint";
     }
 }
 
@@ -400,6 +464,15 @@ function twostepauth_global_end() {
     global $mybb, $plugins, $lang, $templates, $session, $headerinclude, $theme, $header, $footer, $navigation, $db;
 
     $lang->load("twostepauth");
+
+    //hint injection
+    if($mybb->user["uid"] && $mybb->settings["twostepauth_hint"] == '1' && $mybb->user["twostepauth_enabled"] == "0" && $mybb->user["twostepauth_hide_hint"] != "1" && THIS_SCRIPT != "usercp.php")
+    {
+        eval("\$hint = \"{$templates->get("twostepauth_hint")}\";");
+        $templates->cache["header"] .= $hint;
+        $header .= $hint;
+    }
+
     if(!$mybb->user["uid"]) return;
     if(!isset($mybb->user["twostepauth_enabled"])) return;
     if($mybb->user["twostepauth_enabled"] != "1") return;
@@ -424,12 +497,6 @@ function twostepauth_global_end() {
         $plugins->run_hooks("member_logout_end");
 
        error($lang->twostepauth_force_logged_out, $lang->twostepauth_force_logged_out_title);
-
-        /*$title = $lang->twostepauth_force_logged_out_title;
-        $error = $lang->twostepauth_force_logged_out;
-        eval("\$error_page = \"" . $templates->get("error") . "\";");
-        output_page($error_page);
-        exit;*/
     }
 }
 
@@ -557,6 +624,13 @@ function twostepauth_usercp_start()
         redirect("usercp.php?action=2stepauth", $lang->twostepauth_updated);
     }
 
+    if($mybb->input['hide_notice'] == '1' && isset($mybb->input["my_post_key"])) {
+        verify_post_check($mybb->input["my_post_key"]);
+        twostepauth_hide_hint();
+        if($mybb->input["redir_back"] == "1" && isset($_SERVER["HTTP_REFERER"]) && substr($_SERVER["HTTP_REFERER"], 0, strlen($mybb->settings["bburl"])) == $mybb->settings["bburl"])
+            redirect($_SERVER["HTTP_REFERER"], $lang->twostepauth_hint_hidden);
+    }
+
     $rows = "";
     $query = $db->simple_select("twostepauth_authorizations", "ip,location", "uid = ".$mybb->user["uid"]);
     while($item = $db->fetch_array($query)) {
@@ -566,6 +640,8 @@ function twostepauth_usercp_start()
         $rows .= $row;
     }
     $twostepauth_enable = $mybb->user["twostepauth_enabled"] == '1' ? "checked=\"checked\"" : "";
+    $options_show = $mybb->user["twostepauth_enabled"] != "1" ? " style=\"display:none\"" : "";
+    $qr_show = $mybb->user["twostepauth_method"] != "1" ? " style=\"display:none\"" : "";
     //the iphone doesn't like whitespaces, so we just take them out of the bbname
     $qr = $auth->getQRCodeGoogleUrl($mybb->user["username"] . "@" . str_replace(" ", "", $mybb->settings["bbname"]), twostepauth_decrypt($mybb->user["twostepauth_secret"]));
     eval("\$output = \"" . $templates->get("usercp_twostepauth") . "\";");
@@ -639,6 +715,11 @@ function twostepauth_authorize_ip($ip, $uid, $code) {
     global $db;
     $loc = twostepauth_get_location($ip);
     $db->insert_query("twostepauth_authorizations", array("ip" => $ip, "location" => $loc, "code" => $code, "uid" => $uid));
+}
+
+function twostepauth_hide_hint() {
+    global $db, $mybb;
+    $db->update_query("users", array("twostepauth_hide_hint" => "1"), "uid = '{$mybb->user['uid']}'");
 }
 
 /**
