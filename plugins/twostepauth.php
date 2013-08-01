@@ -19,6 +19,7 @@ $plugins->add_hook("member_do_register_end", "twostepauth_register");
 $plugins->add_hook("usercp_start", "twostepauth_usercp_start");
 $plugins->add_hook("usercp_menu", "twostepauth_usercp_menu");
 $plugins->add_hook("datahandler_user_update", "twostepauth_user_update");
+$plugins->add_hook("datahandler_user_validate", "twostepauth_user_validate");
 $plugins->add_hook("global_start", "twostepauth_global_start");
 $plugins->add_hook("global_end", "twostepauth_global_end");
 
@@ -26,8 +27,8 @@ function twostepauth_info()
 {
     global $mybb;
     $info =  array(
-        "name" => "2StepAuth",
-        "description" => "A plugin that provides basic 2 step authentication trough google authenticator.",
+        "name" => "<img src=\"{$mybb->settings["bburl"]}/images/lockfolder.gif\"/> 2StepAuth",
+        "description" => "A plugin that provides basic 2 step authentication trough Google Authenticator and E-mail.",
         "website" => "http://jariz.pro",
         "author" => "Youtubelers.com",
         "authorsite" => "http://youtubelers.com",
@@ -35,7 +36,7 @@ function twostepauth_info()
         "guid" => "",
         "compatibility" => "*"
     );
-    if(twostepauth_is_installed()) $info["description"] .= "<br><a style='color:#C00;' href='index.php?module=config-plugins&action=deactivate&uninstall=1&plugin=twostepauth&my_post_key={$mybb->post_code}&harakiri=1' onclick=\"return confirm('Are you sure this is what you want? This will remove ALL AUTHORIZATIONS and 2stepauth user settings, theres no way to recover this ever again. If you want to uninstall the plugin normally, use the uninstall option on the right.');\">Click here to use a special kind of uninstall that will remove all user settings and authorizations.</a>";
+    if(twostepauth_is_installed()) $info["description"] .= "<a style='color:#C00; float:right;position: relative;top: -5px;' href='index.php?module=config-plugins&action=deactivate&uninstall=1&plugin=twostepauth&my_post_key={$mybb->post_code}&harakiri=1' onclick=\"if(confirm('Are you sure this is what you want? This will remove ALL AUTHORIZATIONS and 2stepauth user settings, theres no way to recover this ever again. If you want to uninstall the plugin normally, use the uninstall option on the right.')) return confirm('Totally sure? This will remove every trace of 2stepauth ever existing and theres no way to ever get your data back.'); else return false;\">Harakiri</a>";
     return $info;
 }
 
@@ -71,6 +72,13 @@ function twostepauth_install()
 `location` TEXT NOT NULL ,
 `code`  int(6) NOT NULL ,
 `uid`  int NOT NULL ,
+PRIMARY KEY (`id`)
+);");
+
+    if($db->table_exists("twostepauth_authorization_keys")) $db->query("CREATE TABLE `".TABLE_PREFIX."twostepauth_authorization_keys` (
+`id`  int NULL AUTO_INCREMENT ,
+`uid`  int NULL ,
+`key`  text NULL ,
 PRIMARY KEY (`id`)
 );");
 
@@ -142,19 +150,7 @@ PRIMARY KEY (`id`)
     }
 }
 
-function twostepauth_activate()
-{
-    global $db;
-//    require MYBB_ROOT . '/inc/adminfunctions_templates.php';
-//    find_replace_templatesets(
-//        "index",
-//        '#' . preg_quote('{$boardstats}') . '#',
-//        '{$boardstats}{$randomvar}'
-//    );
-
-
-    $info = twostepauth_info();
-
+function twostepauth_templates() {
     $usercp_twostepauth = <<<USERCP
 <html>
 <head>
@@ -209,8 +205,8 @@ function twostepauth_activate()
                                     <tr>
                                         <td valign="top" width="1">
                                             <select name="twostepauth_method" id="twostepauth_method_input">
-                                                <option value="1">{\$lang->twostepauth_method1}</option>
-                                                <option value="2">{\$lang->twostepauth_method2}</option>
+                                                <option value="1"{\$method1_selected}>{\$lang->twostepauth_method1}</option>
+                                                <option value="2"{\$method2_selected}>{\$lang->twostepauth_method2}</option>
                                             </select>
                                         </td>
                                     </tr>
@@ -264,13 +260,20 @@ function twostepauth_activate()
             </td>
         </tr>
     </table>
+
+
+    <!-- note: if you remove this, you will violate maxmind's license: http://www.maxmind.com/download/geoip/database/LICENSE.txt -->
+    <!-- remove at your own risk, i, the creator of 2stepauth am not responsible for the consequences -->
+    <span class="smalltext float_right" style="display: block; padding-right: 2px; text-align:right;">{\$lang->twostepauth_maxmind} <a href="http://www.maxmind.com">maxmind.com</a><br>
+    <!-- kind of a bitch move to remove this, but go ahead if you really need to... -->
+    {\$lang->twostepauth_credits} <a href="http://youtubelers.com">youtubelers.com</a></span>
+    <br>
 {\$footer}
 </body>
 </html>
 USERCP;
 
     $twostepauth_authorize = <<<AUTHORIZE
-
 <html>
 <head>
     <title>{\$mybb->settings['bbname']} - {\$lang->twostepauth}</title>
@@ -309,6 +312,86 @@ USERCP;
 </html>
 AUTHORIZE;
 
+    $twostepauth_authorize_email = <<<AUTHORIZE
+
+<html>
+<head>
+    <title>{\$mybb->settings['bbname']} - {\$lang->twostepauth}</title>
+    {\$headerinclude}
+</head>
+<body>
+{\$header}
+
+{\$twostepauth_error}
+<table border="0" cellspacing="1" cellpadding="4" class="tborder">
+<tr>
+<td class="thead"><span class="smalltext"><strong>{\$lang->twostepauth}</strong></span></td>
+</tr>
+<tr>
+<td class="trow1">
+<p>{\$lang->twostepauth_email_send}<br><a href="{\$mybb->settings['contactlink']}">{\$lang->twostepauth_contact}</a></p>
+</td>
+</tr>
+<tr>
+<td class="trow1">
+<form action="member.php" method="post">
+<input type="text" class="textbox" name="twostepauth" maxlength="10" style="width: 220px;font-size: 40px;margin: 0 auto;display: block;margin-top: 10px;">
+<input type="hidden" name="action" value="do_login" />
+<input type="hidden" name="username" value="{\$username}" />
+<input type="hidden" name="password" value="{\$password}" />
+<input type="hidden" name="url" value="{\$redirect_url}" />
+<br>
+<input type="submit" value="{\$lang->twostepauth_authorize}" style="display:block;margin:0 auto;margin-bottom: 10px;">
+</form>
+</td>
+</tr>
+</table>
+
+{\$footer}
+</body>
+</html>
+AUTHORIZE;
+    
+    $twostepauth_authorize_email_from_link = <<<AUTHORIZE
+<html>
+<head>
+<title>{\$mybb->settings['bbname']} - {\$lang->twostepauth}</title>
+{\$headerinclude}
+</head>
+<body>
+{\$header}
+<br />
+<form action="member.php" method="post"><table border="0" cellspacing="1" cellpadding="4" class="tborder">
+<tbody><tr>
+<td class="thead" colspan="2"><strong>{\$lang->twostepauth}</strong></td>
+</tr>
+<tr>
+<td class="trow1" colspan="2">{\$lang->twostepauth_please_reenter_login_info}</td>
+</tr>
+<tr>
+<td class="trow1"><strong>{\$lang->username}</strong></td>
+<td class="trow1"><input type="text" class="textbox" name="username" size="25" maxlength="30" style="width: 200px;" value=""></td>
+</tr>
+<tr>
+<td class="trow2"><strong>{\$lang->password}</strong><br><span class="smalltext">{\$lang->pw_note}</span></td>
+<td class="trow2"><input type="password" class="textbox" name="password" size="25" style="width: 200px;" value=""></td>
+</tr>
+<tr>
+<td class="trow2"><strong>{\$lang->twostepauth_authorization_code}:</strong><br><span class="smalltext">{\$lang->twostepauth_authnote}</span></td>
+<td class="trow2"><input type="text" class="textbox" name="twostepauth" maxlength="10" value="{\$activation_code}" style="width: 200px;"></td>
+</tr>
+</tbody></table>
+<br />
+<div align="center"><input type="submit" class="button" name="submit" value="{\$lang->login}" /></div>
+<input type="hidden" name="action" value="do_login" />
+<input type="hidden" name="url" value="{\$redirect_url}" />
+</form>
+{\$footer}
+</body>
+</html>
+AUTHORIZE;
+
+    
     $usercp_twostepauth_row = <<<ROW
 <tr>
     <td class="trow1">
@@ -337,19 +420,41 @@ ROW;
 HINT;
 
     $twostepauth_email = <<<EMAIL
-<p>{\$lang->twostepauth_email1} <a href="{\$mybb->settings["bburl"]}>{\$mybb->settings["bbname"}</a>{\$lang->twostepauth_email2} {\$ip} (\$location} {\$lang->twostepauth_email3} <a href="{\$mybb->settings["bburl"]}/usercp.php?action=password">{\$lang->twostepauth_email4}</a></p>
+<p>{\$lang->twostepauth_email1} <a href="{\$mybb->settings['bburl']}">{\$mybb->settings['bbname']}</a>{\$lang->twostepauth_email2} {\$ip} ({\$location}) {\$lang->twostepauth_email3} <a href="{\$mybb->settings['bburl']}/usercp.php?action=password">{\$lang->twostepauth_email4}</a></p>
 <p>{\$lang->twostepauth_email5} <a href="{\$activation_link}">{\$lang->twostepauth_email6}</a></p>
 <p>{\$lang->twostepauth_email7} {\$activation_code} </p>
 EMAIL;
 
+    $twostepauth_email_plain = <<<EMAIL
+{\$lang->twostepauth_email1} {\$mybb->settings['bbname']}{\$lang->twostepauth_email2} {\$ip} (\$location} {\$lang->twostepauth_email3} {\$lang->twostepauth_email4}: {\$mybb->settings['bburl']}/usercp.php?action=password
+{\$lang->twostepauth_email5} {\$lang->twostepauth_email6}: {\$activation_link}
+{\$lang->twostepauth_email7} {\$activation_code}
+EMAIL;
+
+    $usercp_nav_2stepauth= "<tr><td class=\"trow1 smalltext\"><a href=\"usercp.php?action=2stepauth\" class=\"usercp_nav_item\" style=\"background:url('images/lockfolder.gif') no-repeat left center\">{\$lang->nav_usercp_2stepauth}</a></td></tr>";
 
     $templates = array(
         "usercp_twostepauth" => $usercp_twostepauth,
         "twostepauth_authorize" => $twostepauth_authorize,
         "usercp_twostepauth_row" => $usercp_twostepauth_row,
         "twostepauth_hint" => $twostepauth_hint,
-        "twostepauth_email" => $twostepauth_email
+        "twostepauth_email" => $twostepauth_email,
+        "twostepauth_email_plain" => $twostepauth_email_plain,
+        "twostepauth_authorize_email" => $twostepauth_authorize_email,
+        "usercp_nav_2stepauth" => $usercp_nav_2stepauth,
+        "twostepauth_authorize_email_from_link" => $twostepauth_authorize_email_from_link
     );
+
+    return $templates;
+}
+
+function twostepauth_activate()
+{
+    global $db;
+
+    $info = twostepauth_info();
+
+    $templates = twostepauth_templates();
 
     foreach ($templates as $template_title => $template_data) {
         $insert_templates = array(
@@ -395,6 +500,9 @@ function twostepauth_uninstall()
         if ($db->table_exists("twostepauth_authorizations"))
             $db->drop_table("twostepauth_authorizations");
 
+        if ($db->table_exists("twostepauth_authorization_keys"))
+            $db->drop_table("twostepauth_authorization_keys");
+
         $config = MYBB_ROOT."inc/config.php";
         $fc = fopen($config, "r");
         //this'll probably never happen because entire mybb can't run if the config isn't readable, but just for the sake of code logic
@@ -415,19 +523,18 @@ function twostepauth_uninstall()
 function twostepauth_deactivate()
 {
     global $db;
-    $db->delete_query("templates", "title='usercp_twostepauth'");
-    $db->delete_query("templates", "title='twostepauth_authorize'");
-    $db->delete_query("templates", "title='usercp_twostepauth_row'");
-    $db->delete_query("templates", "title='twostepauth_hint'");
-    $db->delete_query("templates", "title='twostepauth_email'");
+
+    $templates = twostepauth_templates();
+
+    foreach($templates as $template_title => $template_data) {
+        $db->delete_query("templates", "title='{$template_title}'");
+    }
 }
 
 function twostepauth_is_installed()
 {
     global $db;
-    /*if ($db->table_exists("twostepauth_authorizations") && $db->field_exists("twostepauth_secret", "users") && $db->field_exists("twostepauth_enabled", "users")) {
-        return true;
-    }*/
+
     $result = $db->simple_select('settinggroups', 'gid', "name = 'twostepauth_settings'", array('limit' => 1));
     $group = $db->fetch_array($result);
 
@@ -473,6 +580,10 @@ function twostepauth_global_end() {
         $header .= $hint;
     }
 
+    //our evil member.php 'fake' hook
+    if(THIS_SCRIPT == "member.php")
+        twostepauth_member();
+
     if(!$mybb->user["uid"]) return;
     if(!isset($mybb->user["twostepauth_enabled"])) return;
     if($mybb->user["twostepauth_enabled"] != "1") return;
@@ -497,6 +608,19 @@ function twostepauth_global_end() {
         $plugins->run_hooks("member_logout_end");
 
        error($lang->twostepauth_force_logged_out, $lang->twostepauth_force_logged_out_title);
+    }
+
+}
+
+function twostepauth_member() {
+    global $mybb, $footer, $header, $navigation, $headerinclude, $themes, $lang, $templates;
+    $lang->load("twostepauth");
+    if($mybb->input["action"] != "2stepauth_email")
+        return false;
+    if(ctype_digit($mybb->input["key"]) && strlen($mybb->input["key"]) == 10) {
+        $activation_code = $mybb->input["key"];
+        eval("output_page(\"{$templates->get("twostepauth_authorize_email_from_link")}\");");
+        exit;
     }
 }
 
@@ -528,7 +652,7 @@ function twostepauth_login()
         //INTRUDER!
 
         //did he enter this form already?
-        if(ctype_digit($mybb->input["twostepauth"])) {
+        if(ctype_digit($mybb->input["twostepauth"]) && strlen($mybb->input["twostepauth"]) == 6 && $user_info["twosstepauth_method"] == "1") {
             $gauth = new PHPGangsta_GoogleAuthenticator();
             $secret = twostepauth_decrypt($user_info["twostepauth_secret"]);
             if($mybb->input["twostepauth"] == $gauth->getCode($secret)) {
@@ -541,14 +665,18 @@ function twostepauth_login()
                     return;
                 }
             } else $twostepauth_error = $lang->twostepauth_invalid_code;
+        } elseif(ctype_digit($mybb->input["twostepauth_email"]) && strlen($mybb->input["twostepauth_email"]) == 10 && $user_info["twostepauth_method"] == "2") {
+            $res = $db->fetch_array($db->simple_select("twostepauth_authorization_keys", "id", "uid = '{$user_info["uid"]}' && key = '{$db->escape_string($mybb->input["twostepauth_email"])}'"));
+            if($res == null) $twostepauth_error = $lang->twostepauth_invalid_code;
+            else {
+                $db->delete_query("twostepauth_authorizations_keys", "id = {$res["id"]}");
+                twostepauth_authorize_ip($ip, $user["uid"], $mybb->input["twostepauth_email"]);
+                return;
+            }
         }
 
         if(!isset($twostepauth_error)) $twostepauth_error = "";
 
-        //set params
-        $username = $mybb->input["username"];
-        $password = $mybb->input["password"];
-        $redirect_url = $mybb->input["url"];
 
         //cancel log in
         $time = TIME_NOW;
@@ -563,8 +691,31 @@ function twostepauth_login()
         my_unsetcookie("mybbuser");
         my_unsetcookie("sid");
 
+        //set params
+        $username = $mybb->input["username"];
+        $password = $mybb->input["password"];
+        $redirect_url = $mybb->input["url"];
+
+        //send email?
+        if($user_info["twostepauth_method"] == "2") {
+            $ip = get_ip();
+            $location = twostepauth_get_location($ip);
+            $activation_code = my_rand(1000000000, 9999999999);
+            $activation_link = $mybb->settings["bburl"]."/member.php?action=2stepauth_email&key=".$activation_code;
+            eval("\$mail = \"{$templates->get("twostepauth_email")}\";");
+            eval("\$mail_plain = \"{$templates->get("twostepauth_email_plain")}\";");
+
+            my_mail(
+                $user_info["email"],
+                str_replace("{\$bbname}", $mybb->settings["bbname"], str_replace("{\$loc}", $location, $lang->twostepauth_email_subject)),
+                $mail,
+                "", "", "", false, "both", $mail_plain
+            );
+        }
+
         //dump page
-        eval("\$output = \"" . $templates->get("twostepauth_authorize") . "\";");
+        if($user_info["twostepauth_method"] == "1") eval("\$output = \"" . $templates->get("twostepauth_authorize") . "\";");
+        else eval("\$output = \"" . $templates->get("twostepauth_authorize_email") . "\";");
         output_page($output);
         exit;
     }
@@ -578,8 +729,7 @@ function twostepauth_usercp_menu()
 {
     global $lang, $templates;
     $lang->load("twostepauth");
-    $template = "\n\t<tr><td class=\"trow1 smalltext\"><a href=\"usercp.php?action=2stepauth\" class=\"usercp_nav_item\" style=\"background:url('images/lockfolder.gif') no-repeat left center\">{$lang->nav_usercp_2stepauth}</a></td></tr>";
-    $templates->cache["usercp_nav_misc"] = str_replace("<tbody style=\"{\$collapsed['usercpmisc_e']}\" id=\"usercpmisc_e\">", "<tbody style=\"{\$collapsed['usercpmisc_e']}\" id=\"usercpmisc_e\">{$template}", $templates->cache["usercp_nav_misc"]);
+    eval("\$template = \"".$templates->get("usercp_nav_2stepauth")."\";");
 }
 
 function twostepauth_usercp_start()
@@ -605,17 +755,22 @@ function twostepauth_usercp_start()
         $userhandler = new UserDataHandler("update");
         $user = array(
             "uid" => $mybb->user["uid"],
-            "twostepauth_enabled" => isset($mybb->input["twostepauth_enable"]) ? '1' : '0'
+            "twostepauth_enabled" => isset($mybb->input["twostepauth_enable"]) ? '1' : '0',
+            "twostepauth_method" => $mybb->input["twostepauth_method"]
         );
 
         $userhandler->set_data($user);
-        $userhandler->validate_user();
-        $userhandler->update_user();
-        redirect("usercp.php", $lang->twostepauth_updated);
+        if(!$userhandler->validate_user()) {
+            $errors = inline_error($userhandler->get_friendly_errors());
+        }
+        else {
+            $errors = "";
+            $userhandler->update_user();
+            redirect("usercp.php", $lang->twostepauth_updated);
+        }
     }
 
-    if($mybb->input['action'] == "do_2stepauth_delete" && $mybb->request_method == "post")
-    {
+    if($mybb->input['action'] == "do_2stepauth_delete" && $mybb->request_method == "post") {
         verify_post_check($mybb->input['my_post_key']);
 
         $ip = $db->escape_string($mybb->input["ip"]);
@@ -639,6 +794,8 @@ function twostepauth_usercp_start()
         eval("\$row = \"".$templates->get("usercp_twostepauth_row")."\";");
         $rows .= $row;
     }
+    $method1_selected = $mybb->user["twostepauth_method"] == "1" ? " selected=\"selected\"" : "";
+    $method2_selected = $mybb->user["twostepauth_method"] == "2" ? " selected=\"selected\"" : "";
     $twostepauth_enable = $mybb->user["twostepauth_enabled"] == '1' ? "checked=\"checked\"" : "";
     $options_show = $mybb->user["twostepauth_enabled"] != "1" ? " style=\"display:none\"" : "";
     $qr_show = $mybb->user["twostepauth_method"] != "1" ? " style=\"display:none\"" : "";
@@ -655,8 +812,27 @@ function twostepauth_usercp_start()
 function twostepauth_user_update($userhandler) {
     if(isset($userhandler->data["twostepauth_enabled"]))
         $userhandler->user_update_data["twostepauth_enabled"] = intval($userhandler->data["twostepauth_enabled"]);
+
+    if(isset($userhandler->data["twostepauth_method"]))
+        $userhandler->user_update_data["twostepauth_method"] = intval($userhandler->data["twostepauth_method"]);
 }
 
+/**
+ * @param $userhandler UserDataHandler
+ */
+function twostepauth_user_validate($userhandler) {
+    global $lang;
+    if(isset($userhandler->data["twostepauth_method"]))
+        switch($userhandler->data["twostepauth_method"])
+        {
+            case '1':
+            case '2':
+                return true;
+            default;
+                $userhandler->set_error($lang->twostepauth_invalid_method);
+                return false;
+        }
+}
 /**
  * HELPERS
  */
@@ -699,7 +875,6 @@ function twostepauth_get_location($ip)
     $loc .= ", " . $gp["geoplugin_countryName"];
     return $loc;
 }
-
 
 function twostepauth_admin_error($title, $msg)
 {
