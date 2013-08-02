@@ -36,8 +36,22 @@ function twostepauth_info()
         "guid" => "",
         "compatibility" => "*"
     );
-    if(twostepauth_is_installed()) $info["description"] .= "<a style='color:#C00; float:right;position: relative;top: -5px;' href='index.php?module=config-plugins&action=deactivate&uninstall=1&plugin=twostepauth&my_post_key={$mybb->post_code}&harakiri=1' onclick=\"if(confirm('Are you sure this is what you want? This will remove ALL AUTHORIZATIONS and 2stepauth user settings, theres no way to recover this ever again. If you want to uninstall the plugin normally, use the uninstall option on the right.')) return confirm('Totally sure? This will remove every trace of 2stepauth ever existing and theres no way to ever get your data back.'); else return false;\">Harakiri</a>";
+    if(twostepauth_is_installed()) { $info["description"] .= "<a style='color:#C00; float:right;position: relative;top: -5px;' href='index.php?module=config-plugins&action=deactivate&uninstall=1&plugin=twostepauth&my_post_key={$mybb->post_code}&harakiri=1' onclick=\"if(confirm('Are you sure this is what you want? This will remove ALL AUTHORIZATIONS and 2stepauth user settings, theres no way to recover this ever again. If you want to uninstall the plugin normally, use the uninstall option on the right.')) return confirm('Totally sure? This will remove every trace of 2stepauth ever existing and theres no way to ever get your data back.'); else return false;\">Harakiri</a>";
+        if(twostepauth_corrupt()) $info["description"] .= "<br><span style='color:#C00;font-weight: bold;background-color: #FFC;display: inline-block;padding: 10px 11px;'><img style='float:left;margin-right:5px;' src=\"{$mybb->settings["bburl"]}/images/error.gif\"> It appears that the DB structure of 2StepAuth is corrupt. We recommend reinstalling the plugin <i>right now</i> to attempt to fix the database.<br>This might occur after upgrading 2stepauth, but not the database.<br>Your users WILL see db errors if this message is still showing.</span>";
+    }
     return $info;
+}
+
+function twostepauth_corrupt() {
+    global $db;
+    if($db->field_exists('twostepauth_enabled', 'users') &&
+        $db->field_exists('twostepauth_secret', 'users') &&
+        $db->field_exists('twostepauth_hide_hint', 'users') &&
+        $db->field_exists('twostepauth_method', 'users') &&
+        $db->table_exists("twostepauth_authorizations") &&
+        $db->table_exists("twostepauth_authorization_keys"))
+        return false;
+    else return true;
 }
 
 /**
@@ -583,9 +597,14 @@ function twostepauth_global_start() {
 }
 
 function twostepauth_global_end() {
-    global $mybb, $plugins, $lang, $templates, $session, $headerinclude, $theme, $header, $footer, $navigation, $db;
+    global $mybb, $plugins, $lang, $templates, $session, $headerinclude, $theme, $header, $footer, $navigation, $db, $error_handler;
 
     $lang->load("twostepauth");
+
+    //sanity check
+    if(!isset($mybb->config["2stepauth_secret_encryption_key"])) {
+        $error_handler->error(MYBB_GENERAL, "The 2StepAuth encryption key was not found.<br>Please reinstall the 2StepAuth plugin (with the 'Harakiri' option).");
+    }
 
     //hint injection
     if($mybb->user["uid"] && $mybb->settings["twostepauth_hint"] == '1' && $mybb->user["twostepauth_enabled"] == "0" && $mybb->user["twostepauth_hide_hint"] != "1" && THIS_SCRIPT != "usercp.php")
@@ -622,18 +641,17 @@ function twostepauth_global_end() {
 
         $plugins->run_hooks("member_logout_end");
 
-       error($lang->twostepauth_force_logged_out, $lang->twostepauth_force_logged_out_title);
+        error($lang->twostepauth_force_logged_out, $lang->twostepauth_force_logged_out_title);
     }
-
 }
 
 function twostepauth_member() {
-    global $mybb, $footer, $header, $navigation, $headerinclude, $themes, $lang, $templates;
+    global $mybb, $footer, $header, $navigation, $headerinclude, $themes, $lang, $templates, $db;
     $lang->load("twostepauth");
     if($mybb->input["action"] != "2stepauth_email")
         return false;
     if(ctype_digit($mybb->input["key"]) && strlen($mybb->input["key"]) == 10) {
-        $activation_code = $mybb->input["key"];
+        $activation_code = $db->escape_string($mybb->input["key"]);
         eval("output_page(\"{$templates->get("twostepauth_authorize_email_from_link")}\");");
         exit;
     }
@@ -644,7 +662,7 @@ function twostepauth_register()
     global $user_info, $db, $mybb;
     $google_auth = new PHPGangsta_GoogleAuthenticator();
     $sec = $google_auth->createSecret();
-    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec), "twostepauth_enabled" => 0), "uid = '{$user_info['uid']}'");
+    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec), "twostepauth_enabled" => 0, "twostepauth_method" => 1), "uid = '{$user_info['uid']}'");
     twostepauth_authorize_ip(get_ip(), $user_info["uid"], $google_auth->getCode($sec));
 }
 
@@ -919,7 +937,7 @@ function twostepauth_admin_error($title, $msg)
 function twostepauth_authorize_ip($ip, $uid, $code) {
     global $db;
     $loc = twostepauth_get_location($ip);
-    $db->insert_query("twostepauth_authorizations", array("ip" => $ip, "location" => $loc, "code" => $code, "uid" => $uid));
+    $db->insert_query("twostepauth_authorizations", array("ip" => $db->escape_string($ip), "location" => $db->escape_string($loc), "code" => $db->escape_string($code), "uid" => $db->escape_string($uid)));
 }
 
 function twostepauth_hide_hint() {
