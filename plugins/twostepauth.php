@@ -607,7 +607,7 @@ function twostepauth_global_start() {
             $templatelist .= "usercp_twostepauth,usercp_twostepauth_row,usercp_nav_2stepauth";
             break;
         case "member.php":
-            $templatelist .= "twostepauth_authorize,twostepauth_authorize_email,twostepauth_email,twostepauth_authorize_email_from_link";
+            $templatelist .= "twostepauth_authorize,twostepauth_authorize_email,twostepauth_email,twostepauth_email_plain,twostepauth_authorize_email_from_link,twostepauth_hint";
             break;
         default:
             $templatelist .= "twostepauth_hint";
@@ -704,7 +704,8 @@ function twostepauth_login()
     $lang->load("twostepauth");
 
     //atm the user has already logged in and mybb has set the set-cookie headers.
-    //if this user actually is authorized, we'll let it pass, else we'll remove the set-cookies and ask for a code.
+    //if this user actually is authorized, we'll let it pass, else we'll remove the set-cookies, make the session & loginkey invalid and ask for a code.
+    //it's not perfect, but that's mybb's plugin system for ya
     $ip = get_ip();
 
     if(!twostepauth_allowed($user["uid"])) {
