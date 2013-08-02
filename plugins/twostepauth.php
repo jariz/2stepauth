@@ -265,7 +265,7 @@ function twostepauth_templates() {
                                     <tr>
                                         <td class="tcat">IP address</td>
                                         <td class="tcat">Location</td>
-                                        <td class="tcat" style="20px"></td>
+                                        <td class="tcat" style="width:20px"></td>
                                     </tr>
                                     {\$rows}
                                 </table>
@@ -498,7 +498,6 @@ function twostepauth_uninstall()
         rebuild_settings();
     }
 
-
     //user has made the 'harakiri' choice, meaning he wants to remove every trace of twostepauth ever existing
     if($mybb->input["harakiri"] == "1") {
         if ($db->field_exists('twostepauth_enabled', 'users'))
@@ -573,7 +572,7 @@ function twostepauth_global_start() {
 
     switch(THIS_SCRIPT) {
         case "usercp.php":
-            $templatelist .= "usercp_twostepauth,usercp_twostepauth_row";
+            $templatelist .= "usercp_twostepauth,usercp_twostepauth_row,usercp_nav_2stepauth";
             break;
         case "member.php":
             $templatelist .= "twostepauth_authorize,twostepauth_authorize_email,twostepauth_email,twostepauth_authorize_email_from_link";
