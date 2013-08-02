@@ -75,7 +75,8 @@ function twostepauth_install()
 PRIMARY KEY (`id`)
 );");
 
-    if($db->table_exists("twostepauth_authorization_keys")) $db->query("CREATE TABLE `".TABLE_PREFIX."twostepauth_authorization_keys` (
+    if(!$db->table_exists("twostepauth_authorization_keys"))
+        $db->query("CREATE TABLE `".TABLE_PREFIX."twostepauth_authorization_keys` (
 `id`  int NULL AUTO_INCREMENT ,
 `uid`  int NULL ,
 `key`  text NULL ,
@@ -169,6 +170,26 @@ function twostepauth_templates() {
     });
 
     </script>
+    <style>
+    .app-button {
+        background-image:url('http://i.imgur.com/MsYfoap.png');
+        width:132px;
+        height:42px;
+        background-color:#919191;
+        border-radius:5px;
+        display:inline-block;
+        background-position:50% 5px;
+        background-repeat:no-repeat;
+    }
+
+    .app-button:hover {
+    background-color:#5E5E5E;
+    }
+
+    .app-button.play-store {
+        background-position: 50% -54px;
+    }
+    </style>
 </head>
 <body>
 {\$header}
@@ -226,8 +247,8 @@ function twostepauth_templates() {
                                     </tr>
                                     <tr>
                                         <td>
-                                            <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2"><img src="http://i.imgur.com/ppw1gDn.png"></a>
-                                            <a href="https://itunes.apple.com/en/app/google-authenticator/id388497605"><img src="http://i.imgur.com/p71hGce.png"></a>
+                                            <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2" class="app-button play-store"></a>
+                                            <a href="https://itunes.apple.com/en/app/google-authenticator/id388497605" class="app-button app-store"></a>
                                         </td>
                                     </tr>
                                 </table>
@@ -335,7 +356,7 @@ AUTHORIZE;
 <tr>
 <td class="trow1">
 <form action="member.php" method="post">
-<input type="text" class="textbox" name="twostepauth" maxlength="10" style="width: 220px;font-size: 40px;margin: 0 auto;display: block;margin-top: 10px;">
+<input type="text" class="textbox" name="twostepauth_email" maxlength="10" style="width: 220px;font-size: 40px;margin: 0 auto;display: block;margin-top: 10px;">
 <input type="hidden" name="action" value="do_login" />
 <input type="hidden" name="username" value="{\$username}" />
 <input type="hidden" name="password" value="{\$password}" />
@@ -378,7 +399,7 @@ AUTHORIZE;
 </tr>
 <tr>
 <td class="trow2"><strong>{\$lang->twostepauth_authorization_code}:</strong><br><span class="smalltext">{\$lang->twostepauth_authnote}</span></td>
-<td class="trow2"><input type="text" class="textbox" name="twostepauth" maxlength="10" value="{\$activation_code}" style="width: 200px;"></td>
+<td class="trow2"><input type="text" class="textbox" name="twostepauth_email" maxlength="10" value="{\$activation_code}" style="width: 200px;"></td>
 </tr>
 </tbody></table>
 <br />
@@ -560,7 +581,7 @@ function twostepauth_global_start() {
             $templatelist .= "usercp_twostepauth,usercp_twostepauth_row";
             break;
         case "member.php":
-            $templatelist .= "twostepauth_authorize,twostepauth_authorize_email,twostepauth_email";
+            $templatelist .= "twostepauth_authorize,twostepauth_authorize_email,twostepauth_email,twostepauth_authorize_email_from_link";
             break;
         default:
             $templatelist .= "twostepauth_hint";
@@ -652,7 +673,8 @@ function twostepauth_login()
         //INTRUDER!
 
         //did he enter this form already?
-        if(ctype_digit($mybb->input["twostepauth"]) && strlen($mybb->input["twostepauth"]) == 6 && $user_info["twosstepauth_method"] == "1") {
+        if(ctype_digit($mybb->input["twostepauth"]) && strlen($mybb->input["twostepauth"]) == 6 && $user_info["twostepauth_method"] == "1") {
+
             $gauth = new PHPGangsta_GoogleAuthenticator();
             $secret = twostepauth_decrypt($user_info["twostepauth_secret"]);
             if($mybb->input["twostepauth"] == $gauth->getCode($secret)) {
@@ -666,13 +688,17 @@ function twostepauth_login()
                 }
             } else $twostepauth_error = $lang->twostepauth_invalid_code;
         } elseif(ctype_digit($mybb->input["twostepauth_email"]) && strlen($mybb->input["twostepauth_email"]) == 10 && $user_info["twostepauth_method"] == "2") {
-            $res = $db->fetch_array($db->simple_select("twostepauth_authorization_keys", "id", "uid = '{$user_info["uid"]}' && key = '{$db->escape_string($mybb->input["twostepauth_email"])}'"));
+            $res = $db->fetch_array($db->simple_select("twostepauth_authorization_keys", "id", "uid = '{$user_info["uid"]}' AND `key` = '{$db->escape_string($mybb->input["twostepauth_email"])}'"));
+            $dont_send_email = true;
             if($res == null) $twostepauth_error = $lang->twostepauth_invalid_code;
             else {
-                $db->delete_query("twostepauth_authorizations_keys", "id = {$res["id"]}");
+                $db->delete_query("twostepauth_authorization_keys", "id = {$res["id"]}");
                 twostepauth_authorize_ip($ip, $user["uid"], $mybb->input["twostepauth_email"]);
                 return;
             }
+        } elseif(strlen($mybb->input["twostepauth_email"]) > 0) {
+            $dont_send_email = true;
+            $twostepauth_error = $lang->twostepauth_invalid_code;
         }
 
         if(!isset($twostepauth_error)) $twostepauth_error = "";
@@ -697,7 +723,7 @@ function twostepauth_login()
         $redirect_url = $mybb->input["url"];
 
         //send email?
-        if($user_info["twostepauth_method"] == "2") {
+        if($user_info["twostepauth_method"] == "2" && !isset($dont_send_email)) {
             $ip = get_ip();
             $location = twostepauth_get_location($ip);
             $activation_code = my_rand(1000000000, 9999999999);
@@ -711,6 +737,8 @@ function twostepauth_login()
                 $mail,
                 "", "", "", false, "both", $mail_plain
             );
+
+            $db->insert_query("twostepauth_authorization_keys", array("uid" => $user_info["uid"], "key" => $activation_code));
         }
 
         //dump page
@@ -730,6 +758,9 @@ function twostepauth_usercp_menu()
     global $lang, $templates;
     $lang->load("twostepauth");
     eval("\$template = \"".$templates->get("usercp_nav_2stepauth")."\";");
+    $src = '<tr><td class="trow1 smalltext"><a href="usercp.php?action=options';
+    $templates->cache["usercp_nav_profile"] = str_replace('<tr><td class="trow1 smalltext"><a href="usercp.php?action=options', $template . $src, $templates->cache["usercp_nav_profile"]);
+    //var_dump($templates->cache["usercp_nav_profile"], $templates->cache);
 }
 
 function twostepauth_usercp_start()
