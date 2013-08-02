@@ -117,11 +117,6 @@ PRIMARY KEY (`id`)
     $gid = $db->insert_id();
 
     $settings = array(
-        'force' => array(
-            'title' => 'Force users to use 2StepAuth',
-            'description' => 'Normally users can choose if they want to use 2StepAuth, this option forces users to use the system, and also removes the choice if enabling/disabling 2StepAuth',
-            'optionscode' => 'onoff',
-            'value' => '0'),
         'geoplugin' => array(
             'title' => 'Look up IP locations?',
             'description' => 'Look up user IPs with geoplugin.net (Example: Amsterdam, The Netherlands)',
@@ -650,7 +645,7 @@ function twostepauth_register()
     global $user_info, $db, $mybb;
     $google_auth = new PHPGangsta_GoogleAuthenticator();
     $sec = $google_auth->createSecret();
-    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec), "twostepauth_enabled" => $mybb->settings["twostepauth_force"]), "uid = '{$user_info['uid']}'");
+    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec), "twostepauth_enabled" => 0), "uid = '{$user_info['uid']}'");
     twostepauth_authorize_ip(get_ip(), $user_info["uid"], $google_auth->getCode($sec));
 }
 
@@ -781,6 +776,11 @@ function twostepauth_usercp_start()
     if($mybb->input['action'] == "do_2stepauth" && $mybb->request_method == "post")
     {
         verify_post_check($mybb->input['my_post_key']);
+
+        //did user enable 2stepauth while his IP wasn't auth'ed yet?
+        //add his ip to auth list
+        if(!twostepauth_allowed($mybb->user["uid"]) && isset($mybb->input["twostepauth_enable"]))
+            twostepauth_authorize_ip(get_ip(), $mybb->user["uid"], $auth->getCode(twostepauth_decrypt($mybb->user["twostepauth_secret"])));
 
         require_once MYBB_ROOT."inc/datahandlers/user.php";
         $userhandler = new UserDataHandler("update");
