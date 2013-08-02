@@ -13,6 +13,7 @@ if (!defined("IN_MYBB")) {
 
 //Login/register shit
 $plugins->add_hook("member_do_login_end", "twostepauth_login");
+$plugins->add_hook("member_do_login_start", "twostepauth_login_start");
 $plugins->add_hook("member_do_register_end", "twostepauth_register");
 
 //UserCP shit
@@ -20,6 +21,8 @@ $plugins->add_hook("usercp_start", "twostepauth_usercp_start");
 $plugins->add_hook("usercp_menu", "twostepauth_usercp_menu");
 $plugins->add_hook("datahandler_user_update", "twostepauth_user_update");
 $plugins->add_hook("datahandler_user_validate", "twostepauth_user_validate");
+
+//Global shit
 $plugins->add_hook("global_start", "twostepauth_global_start");
 $plugins->add_hook("global_end", "twostepauth_global_end");
 
@@ -29,7 +32,7 @@ function twostepauth_info()
     $info =  array(
         "name" => "<img src=\"{$mybb->settings["bburl"]}/images/lockfolder.gif\"/> 2StepAuth",
         "description" => "A plugin that provides basic 2 step authentication trough Google Authenticator and E-mail.",
-        "website" => "http://jariz.pro",
+        "website" => "http://github.com/jariz/2StepAuth",
         "author" => "Youtubelers.com",
         "authorsite" => "http://youtubelers.com",
         "version" => "1.0",
@@ -111,9 +114,9 @@ PRIMARY KEY (`id`)
 
     //give secrets to users that don't have them yet
     $auth = new PHPGangsta_GoogleAuthenticator();
-    $empties = $db->simple_select("users", "uid", "twostepauth_secret = ''");
+    $empties = $db->simple_select("users", "uid,salt", "twostepauth_secret = ''");
     while ($empty = $db->fetch_array($empties)) {
-        $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($auth->createSecret())), "uid = " . $empty["uid"]);
+        $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($auth->createSecret(), $empty["salt"])), "uid = " . $empty["uid"]);
     }
 
     // Insert settings in to the database
@@ -140,7 +143,12 @@ PRIMARY KEY (`id`)
             'title' => 'Show notice encouraging users to enable 2StepAuth?',
             'description' => 'This will show a message to all users notifying them of the 2 step authorization option in their user CP\'s. They can dismiss this message.',
             'optionscode' => 'onoff',
-            'value' => '1')
+            'value' => '1'),
+        'usergroups' => array(
+            'title' => 'Usergroups that are allowed to use 2StepAuth',
+            'description' => 'These usergroup id\'s will be able to use the system, use a csv format. (example: 1,6,3)<br>Leave blank if you want all usergroups to be able to use the system.',
+            'optionscode' => 'text',
+            'value' => '')
     );
 
     $x = 1;
@@ -158,6 +166,16 @@ PRIMARY KEY (`id`)
         $db->insert_query('settings', $insert_settings);
         $x++;
     }
+    rebuild_settings();
+}
+
+function twostepauth_ug_allowed($ug=-1) {
+    global $mybb;
+    if($ug == -1) $ug = $mybb->usergroup["gid"];
+
+    //empty field = all usergroups allowed
+    if(empty($mybb->settings["twostepauth_usergroups"])) return true;
+    else return in_array($ug, explode(",", $mybb->settings["twostepauth_usergroups"]));
 }
 
 function twostepauth_templates() {
@@ -277,8 +295,8 @@ function twostepauth_templates() {
                                 <legend><strong>{\$lang->twostepauth_authorizations}</strong></legend>
                                 <table border="0" cellspacing="1" cellpadding="4" class="tborder">
                                     <tr>
-                                        <td class="tcat">IP address</td>
-                                        <td class="tcat">Location</td>
+                                        <td class="tcat">{\$lang->twostepauth_ip}</td>
+                                        <td class="tcat">{\$lang->twostepauth_location}</td>
                                         <td class="tcat" style="width:20px"></td>
                                     </tr>
                                     {\$rows}
@@ -607,7 +625,7 @@ function twostepauth_global_end() {
     }
 
     //hint injection
-    if($mybb->user["uid"] && $mybb->settings["twostepauth_hint"] == '1' && $mybb->user["twostepauth_enabled"] == "0" && $mybb->user["twostepauth_hide_hint"] != "1" && THIS_SCRIPT != "usercp.php")
+    if($mybb->user["uid"] && $mybb->settings["twostepauth_hint"] == '1' && $mybb->user["twostepauth_enabled"] == "0"  && twostepauth_ug_allowed() && $mybb->user["twostepauth_hide_hint"] != "1" && THIS_SCRIPT != "usercp.php")
     {
         eval("\$hint = \"{$templates->get("twostepauth_hint")}\";");
         $templates->cache["header"] .= $hint;
@@ -662,18 +680,26 @@ function twostepauth_register()
     global $user_info, $db, $mybb;
     $google_auth = new PHPGangsta_GoogleAuthenticator();
     $sec = $google_auth->createSecret();
-    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec), "twostepauth_enabled" => 0, "twostepauth_method" => 1), "uid = '{$user_info['uid']}'");
+    $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($sec, $user_info["salt"]), "twostepauth_enabled" => 0, "twostepauth_method" => 1), "uid = '{$user_info['uid']}'");
     twostepauth_authorize_ip(get_ip(), $user_info["uid"], $google_auth->getCode($sec));
 }
 
+function twostepauth_login_start() {
+    global $db, $mybb;
+    //this function has only 1 purpose and that is intercepting the loginattempts value before mybb changes it back to 1 again because the login is correct
+    if(username_exists($mybb->input["username"])) $GLOBALS["twostepauth_loginattempts"] = $db->fetch_field($db->simple_select("users", "loginattempts", "LOWER(username)='".$db->escape_string(my_strtolower($mybb->input['username']))."' OR LOWER(email)='".$db->escape_string(my_strtolower($mybb->input['username']))."'", array('limit' => 1)), "loginattempts");
+    //no else, because if the username doesn't exist, we'll never reach twostepauth_login anyway
+}
 
 function twostepauth_login()
 {
-    global $user, $db, $mybb, $footer, $header, $navigation, $headerinclude, $themes, $templates, $usercpnav, $lang, $session;
+    global $user, $db, $mybb, $footer, $header, $navigation, $headerinclude, $themes, $templates, $usercpnav, $lang, $session, $logins, $twostepauth_loginattempts;
 
     if($user == null) return;
     $user_info = $db->fetch_array($db->simple_select("users", "*", "uid = ".$user["uid"]));
     if($user_info["twostepauth_enabled"] != "1") return;
+    if(!twostepauth_ug_allowed($user_info["usergroup"])) return;
+
 
     $lang->load("twostepauth");
 
@@ -700,7 +726,7 @@ function twostepauth_login()
                 }
             } else $twostepauth_error = $lang->twostepauth_invalid_code;
         } elseif(ctype_digit($mybb->input["twostepauth_email"]) && strlen($mybb->input["twostepauth_email"]) == 10 && $user_info["twostepauth_method"] == "2") {
-            $res = $db->fetch_array($db->simple_select("twostepauth_authorization_keys", "id", "uid = '{$user_info["uid"]}' AND `key` = '{$db->escape_string($mybb->input["twostepauth_email"])}'"));
+            $res = $db->fetch_array($db->simple_select("twostepauth_authorization_keys", "id", "uid = '{$user_info["uid"]}' AND `key` = '".twostepauth_encrypt($db->escape_string($mybb->input["twostepauth_email"]), $user_info["salt"])."'"));
             $dont_send_email = true;
             if($res == null) $twostepauth_error = $lang->twostepauth_invalid_code;
             else {
@@ -714,6 +740,11 @@ function twostepauth_login()
         }
 
         if(!isset($twostepauth_error)) $twostepauth_error = "";
+        else {
+            //errors occurred, increase mybb's logincount.
+            $db->query("UPDATE ".TABLE_PREFIX."users SET loginattempts = ".($twostepauth_loginattempts+1)." WHERE uid = ".$user_info["uid"]);
+            my_setcookie('loginattempts', $logins + 1);
+        }
 
 
         //cancel log in
@@ -750,7 +781,7 @@ function twostepauth_login()
                 "", "", "", false, "both", $mail_plain
             );
 
-            $db->insert_query("twostepauth_authorization_keys", array("uid" => $user_info["uid"], "key" => $activation_code));
+            $db->insert_query("twostepauth_authorization_keys", array("uid" => $user_info["uid"], "key" => twostepauth_encrypt($activation_code, $user_info["salt"])));
         }
 
         //dump page
@@ -768,16 +799,17 @@ function twostepauth_login()
 function twostepauth_usercp_menu()
 {
     global $lang, $templates;
+    if(!twostepauth_ug_allowed()) return;
     $lang->load("twostepauth");
     eval("\$template = \"".$templates->get("usercp_nav_2stepauth")."\";");
     $src = '<tr><td class="trow1 smalltext"><a href="usercp.php?action=options';
     $templates->cache["usercp_nav_profile"] = str_replace('<tr><td class="trow1 smalltext"><a href="usercp.php?action=options', $template . $src, $templates->cache["usercp_nav_profile"]);
-    //var_dump($templates->cache["usercp_nav_profile"], $templates->cache);
 }
 
 function twostepauth_usercp_start()
 {
     global $db, $footer, $header, $navigation, $headerinclude, $themes, $mybb, $templates, $usercpnav, $lang;
+    if(!twostepauth_ug_allowed()) return;
     $lang->load("twostepauth");
     $auth = new PHPGangsta_GoogleAuthenticator();
 
@@ -902,12 +934,12 @@ function twostepauth_set_up_rijndael()
     return $cipher;
 }
 
-function twostepauth_encrypt($string) {
-    return base64_encode(twostepauth_set_up_rijndael()->encrypt($string));
+function twostepauth_encrypt($string, $salt) {
+    return base64_encode(twostepauth_set_up_rijndael()->encrypt($salt.$string));
 }
 
 function twostepauth_decrypt($string) {
-    return twostepauth_set_up_rijndael()->decrypt(base64_decode($string));
+    return twostepauth_set_up_rijndael()->decrypt(base64_decode(substr($string, 0, 8)));
 }
 
 function twostepauth_get_location($ip)

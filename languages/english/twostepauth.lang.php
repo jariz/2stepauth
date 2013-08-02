@@ -48,3 +48,5 @@ $l["twostepauth_email_subject"] = "Someone from {\$loc} tried to log in to your 
 $l["twostepauth_please_reenter_login_info"] = "For extra security, please re-enter your login information.";
 $l["twostepauth_authorization_code"] = "Authorization code";
 $l["twostepauth_auth_note"] = "This code can be found in the email you received";
+$l["twostepauth_ip"] = "IP Address";
+$l["twostepauth_location"] = "Location";

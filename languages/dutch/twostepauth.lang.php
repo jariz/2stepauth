@@ -48,3 +48,5 @@ $l["twostepauth_email_subject"] = "Iemand van {\$loc} probeerde in te loggen op 
 $l["twostepauth_please_reenter_login_info"] = "Voor extra beveiliging, voer uw gegevens opnieuw in.";
 $l["twostepauth_authorization_code"] = "Autorisatie code";
 $l["twostepauth_auth_note"] = "Deze code kan gevonden worden in de email die u heeft ontvangen.";
+$l["twostepauth_ip"] = "IP adres";
+$l["twostepauth_location"] = "Locatie";
