@@ -14,7 +14,7 @@ Second of all, this is a excellent protection against database 'hacks' - 'hacks'
 The specifics of these 2 statements get explained later down this document.
 
 ##How does smartphone authorization work?
-Please read the main article on the wiki for this (here)[https://github.com/jariz/2stepauth/wiki/HowDoesSmartphoneAuthWork]
+Please read the main article on the wiki for this [here](https://github.com/jariz/2stepauth/wiki/HowDoesSmartphoneAuthWork)
 
 ##How does email authorization work?  
 It's pretty similar to phone authorization, except with email.  
