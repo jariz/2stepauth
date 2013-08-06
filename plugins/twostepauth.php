@@ -116,7 +116,8 @@ PRIMARY KEY (`id`)
     $auth = new PHPGangsta_GoogleAuthenticator();
     $empties = $db->simple_select("users", "uid,salt", "twostepauth_secret = ''");
     while ($empty = $db->fetch_array($empties)) {
-        $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($auth->createSecret(), $empty["salt"])), "uid = " . $empty["uid"]);
+        //note that this also disables 2stepauth because users won't be able to log back in because of their secret having changed. rare situation, but nonetheless.
+        $db->update_query("users", array("twostepauth_secret" => twostepauth_encrypt($auth->createSecret(), $empty["salt"]), "twostepauth_enabled" => 0), "uid = " . $empty["uid"]);
     }
 
     // Insert settings in to the database
@@ -314,7 +315,7 @@ function twostepauth_templates() {
     <!-- remove at your own risk, i, the creator of 2stepauth am not responsible for the consequences -->
     <span class="smalltext float_right" style="display: block; padding-right: 2px; text-align:right;">{\$lang->twostepauth_maxmind} <a href="http://www.maxmind.com">maxmind.com</a><br>
     <!-- kind of a bitch move to remove this, but go ahead if you really need to... -->
-    {\$lang->twostepauth_credits} <a href="http://youtubelers.com">youtubelers.com</a></span>
+    {\$lang->twostepauth_credits} <a href="http://youtubelers.com/?utm_source=UserCP+footer&utm_medium=MyBB&utm_campaign=2StepAuth">youtubelers.com</a></span>
     <br>
 {\$footer}
 </body>
@@ -667,7 +668,7 @@ function twostepauth_member() {
     global $mybb, $footer, $header, $navigation, $headerinclude, $themes, $lang, $templates, $db;
     $lang->load("twostepauth");
     if($mybb->input["action"] != "2stepauth_email")
-        return false;
+        return;
     if(ctype_digit($mybb->input["key"]) && strlen($mybb->input["key"]) == 10) {
         $activation_code = $db->escape_string($mybb->input["key"]);
         eval("output_page(\"{$templates->get("twostepauth_authorize_email_from_link")}\");");
@@ -715,7 +716,7 @@ function twostepauth_login()
         if(ctype_digit($mybb->input["twostepauth"]) && strlen($mybb->input["twostepauth"]) == 6 && $user_info["twostepauth_method"] == "1") {
 
             $gauth = new PHPGangsta_GoogleAuthenticator();
-            $secret = twostepauth_decrypt($user_info["twostepauth_secret"]);
+            $secret = twostepauth_decrypt($user_info["twostepauth_secret"], $user_info["salt"]);
             if($mybb->input["twostepauth"] == $gauth->getCode($secret)) {
                 //did we authorize this code already? (2 times the same code isn't allowed)
                 $code_used = $db->fetch_field($db->simple_select("twostepauth_authorizations", "COUNT(*) as count", "uid = '{$user["uid"]}' AND code = '{$db->escape_string($mybb->input["twostepauth"])}'"), "count");
@@ -830,7 +831,7 @@ function twostepauth_usercp_start()
         //did user enable 2stepauth while his IP wasn't auth'ed yet?
         //add his ip to auth list
         if(!twostepauth_allowed($mybb->user["uid"]) && isset($mybb->input["twostepauth_enable"]))
-            twostepauth_authorize_ip(get_ip(), $mybb->user["uid"], $auth->getCode(twostepauth_decrypt($mybb->user["twostepauth_secret"])));
+            twostepauth_authorize_ip(get_ip(), $mybb->user["uid"], $auth->getCode(twostepauth_decrypt($mybb->user["twostepauth_secret"], $mybb->user["salt"])));
 
         require_once MYBB_ROOT."inc/datahandlers/user.php";
         $userhandler = new UserDataHandler("update");
@@ -881,7 +882,7 @@ function twostepauth_usercp_start()
     $options_show = $mybb->user["twostepauth_enabled"] != "1" ? " style=\"display:none\"" : "";
     $qr_show = $mybb->user["twostepauth_method"] != "1" ? " style=\"display:none\"" : "";
     //the iphone doesn't like whitespaces, so we just take them out of the bbname
-    $qr = $auth->getQRCodeGoogleUrl($mybb->user["username"] . "@" . str_replace(" ", "", $mybb->settings["bbname"]), twostepauth_decrypt($mybb->user["twostepauth_secret"]));
+    $qr = $auth->getQRCodeGoogleUrl($mybb->user["username"] . "@" . str_replace(" ", "", $mybb->settings["bbname"]), twostepauth_decrypt($mybb->user["twostepauth_secret"], $mybb->user["salt"]));
     eval("\$output = \"" . $templates->get("usercp_twostepauth") . "\";");
     output_page($output);
     exit;
@@ -913,6 +914,7 @@ function twostepauth_user_validate($userhandler) {
                 $userhandler->set_error($lang->twostepauth_invalid_method);
                 return false;
         }
+    else return true;
 }
 /**
  * HELPERS
@@ -926,21 +928,20 @@ function twostepauth_allowed($uid,$ip=-1) {
     return $db->fetch_field($db->simple_select("twostepauth_authorizations", "COUNT(*) as count", "uid = {$uid} AND ip = '{$ip}'"), "count") == 1;
 }
 
-function twostepauth_set_up_rijndael()
+function twostepauth_set_up_rijndael($salt)
 {
     global $config;
     $cipher = new Crypt_Rijndael(CRYPT_RIJNDAEL_MODE_ECB);
-    $cipher->setKeyLength(256);
-    $cipher->setKey($config["2stepauth_secret_encryption_key"]);
+    $cipher->setKey($salt.$config["2stepauth_secret_encryption_key"]);
     return $cipher;
 }
 
 function twostepauth_encrypt($string, $salt) {
-    return base64_encode(twostepauth_set_up_rijndael()->encrypt($salt.$string));
+    return base64_encode(twostepauth_set_up_rijndael($salt)->encrypt($string));
 }
 
-function twostepauth_decrypt($string) {
-    return twostepauth_set_up_rijndael()->decrypt(base64_decode(substr($string, 0, 8)));
+function twostepauth_decrypt($string, $salt) {
+    return twostepauth_set_up_rijndael($salt)->decrypt(base64_decode($string));
 }
 
 function twostepauth_get_location($ip)
