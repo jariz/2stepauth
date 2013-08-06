@@ -36,7 +36,7 @@ function twostepauth_info()
         "author" => "Youtubelers.com",
         "authorsite" => "http://youtubelers.com/?utm_source=Admin+Plugin+Module&utm_medium=MyBB&utm_campaign=2StepAuth",
         "version" => "1.0",
-        "guid" => "fc10c2898600fa940f9e561040490a67",
+        "guid" => "d5744f21a15b1a5600a5f9b0b013f9d0",
         "compatibility" => "*"
     );
     if(twostepauth_is_installed()) { $info["description"] .= "<a style='color:#C00; float:right;position: relative;top: -5px;' href='index.php?module=config-plugins&action=deactivate&uninstall=1&plugin=twostepauth&my_post_key={$mybb->post_code}&harakiri=1' onclick=\"if(confirm('Are you sure this is what you want? This will remove ALL AUTHORIZATIONS and 2stepauth user settings, theres no way to recover this ever again. If you want to uninstall the plugin normally, use the uninstall option on the right.')) return confirm('Totally sure? This will remove every trace of 2stepauth ever existing and theres no way to ever get your data back.'); else return false;\">Harakiri</a>";
