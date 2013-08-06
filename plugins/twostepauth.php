@@ -34,7 +34,7 @@ function twostepauth_info()
         "description" => "A plugin that provides basic 2 step authentication trough Google Authenticator and E-mail.",
         "website" => "http://github.com/jariz/2StepAuth",
         "author" => "Youtubelers.com",
-        "authorsite" => "http://youtubelers.com",
+        "authorsite" => "http://youtubelers.com/?utm_source=Admin+Plugin+Module&utm_medium=MyBB&utm_campaign=2StepAuth",
         "version" => "1.0",
         "guid" => "",
         "compatibility" => "*"
