@@ -644,7 +644,7 @@ function twostepauth_global_end() {
     //this function runs a query every time to see if this ip is still allowed to be on this uid. if not, it forces the user to gtfo.
     //resource expensive, but i sadly see no other way.
 
-    if(!twostepauth_allowed($mybb->user["uid"])) {
+    if(!twostepauth_allowed($mybb->user["username"])) {
         //gtfo time!
 
         my_unsetcookie("mybbuser");
@@ -697,7 +697,7 @@ function twostepauth_login()
     global $user, $db, $mybb, $footer, $header, $navigation, $headerinclude, $themes, $templates, $usercpnav, $lang, $session, $logins, $twostepauth_loginattempts;
 
     if($user == null) return;
-    $user_info = $db->fetch_array($db->simple_select("users", "*", "uid = ".$user["uid"]));
+    $user_info = $db->fetch_array($db->simple_select("users", "*", "username = '".$user["username"]."'"));
     if($user_info["twostepauth_enabled"] != "1") return;
     if(!twostepauth_ug_allowed($user_info["usergroup"])) return;
 
@@ -709,7 +709,7 @@ function twostepauth_login()
     //it's not perfect, but that's mybb's plugin system for ya
     $ip = get_ip();
 
-    if(!twostepauth_allowed($user["uid"])) {
+    if(!twostepauth_allowed($user["username"])) {
         //INTRUDER!
 
         //did he enter this form already?
@@ -830,8 +830,8 @@ function twostepauth_usercp_start()
 
         //did user enable 2stepauth while his IP wasn't auth'ed yet?
         //add his ip to auth list
-        if(!twostepauth_allowed($mybb->user["uid"]) && isset($mybb->input["twostepauth_enable"]))
-            twostepauth_authorize_ip(get_ip(), $mybb->user["uid"], $auth->getCode(twostepauth_decrypt($mybb->user["twostepauth_secret"], $mybb->user["salt"])));
+        if(!twostepauth_allowed($mybb->user["username"]) && isset($mybb->input["twostepauth_enable"]))
+            twostepauth_authorize_ip(get_ip(), $mybb->user["username"], $auth->getCode(twostepauth_decrypt($mybb->user["twostepauth_secret"], $mybb->user["salt"])));
 
         require_once MYBB_ROOT."inc/datahandlers/user.php";
         $userhandler = new UserDataHandler("update");
@@ -920,12 +920,13 @@ function twostepauth_user_validate($userhandler) {
  * HELPERS
  */
 
-function twostepauth_allowed($uid,$ip=-1) {
+function twostepauth_allowed($username,$ip=-1) {
     global $db;
+    $uid = $db->fetch_field($db->simple_select("users", "uid", "username = '{$username}'"), "uid");
 
     //this function checks if the user is allowed on this uid & ip
     if($ip==-1) $ip = get_ip();
-    return $db->fetch_field($db->simple_select("twostepauth_authorizations", "COUNT(*) as count", "uid = {$uid} AND ip = '{$ip}'"), "count") == 1;
+    return $db->fetch_field($db->simple_select("twostepauth_authorizations", "COUNT(*) as count", "uid = '{$uid}' AND ip = '{$ip}'"), "count") == 1;
 }
 
 function twostepauth_set_up_rijndael($salt)
@@ -971,7 +972,7 @@ function twostepauth_admin_error($title, $msg)
 function twostepauth_authorize_ip($ip, $uid, $code) {
     global $db;
     $loc = twostepauth_get_location($ip);
-    $db->insert_query("twostepauth_authorizations", array("ip" => $db->escape_string($ip), "location" => $db->escape_string($loc), "code" => $db->escape_string($code), "uid" => $db->escape_string($uid)));
+    $db->insert_query("twostepauth_authorizations", array("ip" => $db->escape_string($ip), "location" => $db->escape_string($loc), "code" => $db->escape_string($code), "username" => $db->escape_string($uid)));
 }
 
 function twostepauth_hide_hint() {
